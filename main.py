@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status, Security
+from fastapi import FastAPI, HTTPException, Depends, status, Security, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, validator, EmailStr, constr
 from typing import List, Optional, Dict
@@ -13,6 +13,7 @@ from decimal import Decimal
 import logging
 from logging.handlers import RotatingFileHandler
 import traceback
+import json
 
 # Security Configuration
 SECRET_KEY = "your-secret-key-here"  # In production, use environment variable
@@ -28,6 +29,32 @@ SQLALCHEMY_DATABASE_URL = "sqlite:///./pos.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+# Audit Log Configuration
+class AuditAction(str, Enum):
+    CREATE = "CREATE"
+    READ = "READ"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
+    LOGIN = "LOGIN"
+    LOGOUT = "LOGOUT"
+    SALE = "SALE"
+    REPORT = "REPORT"
+    ERROR = "ERROR"
+
+# Configure audit logger
+audit_logger = logging.getLogger('audit')
+audit_logger.setLevel(logging.INFO)
+handler = RotatingFileHandler(
+    'audit.log',
+    maxBytes=10485760,  # 10MB
+    backupCount=10
+)
+formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+handler.setFormatter(formatter)
+audit_logger.addHandler(handler)
 
 # Database Models
 class UserDB(Base):
@@ -158,7 +185,14 @@ class SaleItem(SaleItemCreate):
 
 class SaleCreate(BaseModel):
     items: List[SaleItemCreate]
-    payment_method: constr(regex='^(cash|credit|debit)$')
+    payment_method: str
+
+    @validator("payment_method")
+    def validate_payment_method(cls, value):
+        allowed_methods = {"cash", "credit", "debit"}
+        if value not in allowed_methods:
+            raise ValueError(f"payment_method must be one of {allowed_methods}")
+        return value
 
 class Sale(BaseModel):
     id: str
